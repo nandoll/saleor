@@ -112,7 +112,12 @@ def update_checkout_shipping_method_if_invalid(
 
 
 def check_lines_quantity(
-    variants, quantities, country, channel_slug, allow_zero_quantity=False
+    variants,
+    quantities,
+    country,
+    channel_slug,
+    allow_zero_quantity=False,
+    checkout_lines=None,
 ):
     """Clean quantities and check if stock is sufficient for each checkout line.
 
@@ -154,7 +159,9 @@ def check_lines_quantity(
                 }
             )
     try:
-        check_stock_quantity_bulk(variants, country, quantities, channel_slug)
+        check_stock_quantity_bulk(
+            variants, country, quantities, channel_slug, checkout_lines
+        )
     except InsufficientStock as e:
         errors = [
             ValidationError(

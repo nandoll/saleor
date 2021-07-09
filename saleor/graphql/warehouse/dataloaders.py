@@ -1,5 +1,4 @@
 from collections import defaultdict
-from itertools import chain
 from typing import DefaultDict, Iterable, List, Optional, Tuple
 from uuid import UUID
 

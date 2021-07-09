@@ -1,4 +1,5 @@
 from collections import defaultdict
+from itertools import chain
 from typing import DefaultDict, Iterable, List, Optional, Tuple
 from uuid import UUID
 
@@ -6,7 +7,10 @@ from django.conf import settings
 from django.db.models import Exists, OuterRef
 
 from ...channel.models import Channel
-from ...warehouse.models import ShippingZone, Stock, Warehouse
+from ...warehouse.models import Reservation, ShippingZone, Stock, Warehouse
+from ..account.dataloaders import AddressByIdLoader
+from ..channel.dataloaders import ChannelBySlugLoader
+from ..checkout.dataloaders import CheckoutLinesByCheckoutTokenLoader
 from ..core.dataloaders import DataLoader
 
 CountryCode = Optional[str]
@@ -206,9 +210,94 @@ class StocksWithAvailableQuantityByProductVariantIdCountryCodeAndChannelLoader(
         ]
 
 
+class StocksReservationsByCheckoutTokenLoader(DataLoader):
+    context_key = "stock_reservation_by_checkout_id"
+
+    def batch_load(self, keys):
+        def with_checkouts_lines(checkouts_lines):
+            checkouts_keys_map = {}
+            for i, key in enumerate(keys):
+                for checkout_line in checkouts_lines[i]:
+                    checkouts_keys_map[checkout_line.id] = key
+
+            reservations_map = defaultdict(list)
+            reservations = Reservation.objects.filter(
+                checkout_line_id__in=checkouts_keys_map.keys()
+            ).not_expired()  # type: ignore
+            for reservation in reservations:
+                checkout_key = checkouts_keys_map[reservation.checkout_line_id]
+                reservations_map[checkout_key].append(reservation)
+
+            return [reservations_map[key] for key in keys]
+
+        return (
+            CheckoutLinesByCheckoutTokenLoader(self.context)
+            .load_many(keys)
+            .then(with_checkouts_lines)
+        )
+
+
+class StocksReservationsByCheckoutLineIdLoader(DataLoader):
+    context_key = "stock_reservation_by_checkout_line_id"
+
+    def batch_load(self, keys):
+        def with_checkouts_lines(checkouts_lines):
+            return []
+
+        return (
+            StocksReservationsByCheckoutLineIdLoader(self.context)
+            .load_many(keys)
+            .then(with_reservations)
+        )
+
+
 class WarehouseByIdLoader(DataLoader):
     context_key = "warehouse_by_id"
 
     def batch_load(self, keys):
         warehouses = Warehouse.objects.in_bulk(keys)
         return [warehouses.get(UUID(warehouse_uuid)) for warehouse_uuid in keys]
+
+
+class WarehouseCountryCodeByChannelLoader(DataLoader):
+    """Loads country code of a first available warehouse that is found for a channel."""
+
+    context_key = "warehouse_country_code_by_channel"
+
+    def batch_load(self, keys):
+        def with_channels(channels):
+            address_id_by_channel_slug = dict()
+            for channel in channels:
+                first_warehouse = Warehouse.objects.get_first_warehouse_for_channel(
+                    channel.id
+                )
+                if first_warehouse:
+                    address_id_by_channel_slug[
+                        channel.slug
+                    ] = first_warehouse.address_id
+
+            def with_addresses(addresses):
+                address_by_id = {address.pk: address for address in addresses}
+                country_codes = []
+                for key in keys:
+                    address_id = address_id_by_channel_slug.get(key)
+                    address = address_by_id.get(address_id) if address_id else None
+                    if address and address.country:
+                        country_code = address.country.code
+                    else:
+                        # Fallback when warehouse address has no country set. API has
+                        # validation to prevent from adding such addresses, so this is
+                        # added only to handle an edge-case if a warehouse would be
+                        # added with bypassing the API (for instance with a migration).
+                        country_code = settings.DEFAULT_COUNTRY
+                    country_codes.append(country_code)
+                return country_codes
+
+            address_ids = address_id_by_channel_slug.values()
+            return (
+                AddressByIdLoader(self.context)
+                .load_many(address_ids)
+                .then(with_addresses)
+            )
+
+        return ChannelBySlugLoader(self.context).load_many(keys).then(with_channels)

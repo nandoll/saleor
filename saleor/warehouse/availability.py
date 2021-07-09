@@ -10,7 +10,6 @@ from .models import Reservation, Stock, StockQuerySet
 if TYPE_CHECKING:
     from ..checkout.models import CheckoutLine
     from ..product.models import Product, ProductVariant
-    from .models import ReservationQuerySet
 
 
 def _get_available_quantity(
@@ -134,11 +133,11 @@ def get_reserved_quantity(
     stocks: StockQuerySet, current_checkout_lines: Optional[List["CheckoutLine"]] = None
 ) -> int:
     result = (
-        Reservation.objects.filter(
+        Reservation.objects.not_expired()
+        .exclude_checkout_lines(current_checkout_lines)
+        .filter(
             stock__in=stocks,
         )
-        .not_expired()
-        .exclude_checkout_lines(current_checkout_lines)
         .aggregate(
             quantity_reserved=Coalesce(Sum("quantity_reserved"), 0),
         )
@@ -156,11 +155,11 @@ def get_reserved_quantity_bulk(
         return reservations
 
     result = (
-        Reservation.objects.filter(
+        Reservation.objects.not_expired()
+        .exclude_checkout_lines(current_checkout_lines)
+        .filter(
             stock__in=stocks,
         )
-        .not_expired()
-        .exclude_checkout_lines(current_checkout_lines)
         .values("stock_id")
         .annotate(
             quantity_reserved=Coalesce(Sum("quantity_reserved"), 0),

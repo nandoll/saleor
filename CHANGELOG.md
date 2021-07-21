@@ -143,6 +143,7 @@ All notable, unreleased changes to this project will be documented in this file.
 
 - Add webhooks for stock changes: `PRODUCT_VARIANT_OUT_OF_STOCK` and `PRODUCT_VARIANT_BACK_IN_STOCK`  - #7590 by @mstrumeck
 - Reserve stocks for checkouts in progress - #7589 by @rafalp
+- Reserve stocks for checkouts - #7589 by @rafalp
 
 ### Breaking
 - Multichannel MVP: Multicurrency - #6242 by @fowczarek @d-wysocki

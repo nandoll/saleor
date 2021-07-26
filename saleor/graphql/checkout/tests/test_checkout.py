@@ -37,7 +37,7 @@ from ....product.models import (
     ProductVariantChannelListing,
 )
 from ....shipping import models as shipping_models
-from ....warehouse.models import Stock
+from ....warehouse.models import Reservation, Stock, Warehouse
 from ...tests.utils import assert_no_permission, get_graphql_content
 from ..mutations import (
     clean_shipping_method,

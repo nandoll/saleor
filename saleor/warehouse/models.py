@@ -1,6 +1,5 @@
 import itertools
 import uuid
-from datetime import timedelta
 from typing import Iterable, Optional, Set
 
 from django.db import models
@@ -212,13 +211,6 @@ class ReservationQuerySet(models.QuerySet):
         return self
 
 
-RESERVATION_TTL = timedelta(seconds=15 * 60)
-
-
-def get_reservation_expiration():
-    return timezone.now() + RESERVATION_TTL
-
-
 class Reservation(models.Model):
     checkout_line = models.ForeignKey(
         CheckoutLine,
@@ -235,7 +227,7 @@ class Reservation(models.Model):
         related_name="reservations",
     )
     quantity_reserved = models.PositiveIntegerField(default=0)
-    reserved_until = models.DateTimeField(default=get_reservation_expiration)
+    reserved_until = models.DateTimeField()
 
     objects = models.Manager.from_queryset(ReservationQuerySet)()
 

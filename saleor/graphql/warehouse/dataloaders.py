@@ -210,7 +210,7 @@ class StocksWithAvailableQuantityByProductVariantIdCountryCodeAndChannelLoader(
 
 
 class StocksReservationsByCheckoutTokenLoader(DataLoader):
-    context_key = "stock_reservation_by_checkout_id"
+    context_key = "stock_reservations_by_checkout_token"
 
     def batch_load(self, keys):
         def with_checkouts_lines(checkouts_lines):
@@ -219,15 +219,20 @@ class StocksReservationsByCheckoutTokenLoader(DataLoader):
                 for checkout_line in checkouts_lines[i]:
                     checkouts_keys_map[checkout_line.id] = key
 
-            reservations_map = defaultdict(list)
-            reservations = Reservation.objects.filter(
-                checkout_line_id__in=checkouts_keys_map.keys()
-            ).not_expired()  # type: ignore
-            for reservation in reservations:
-                checkout_key = checkouts_keys_map[reservation.checkout_line_id]
-                reservations_map[checkout_key].append(reservation)
+            def with_lines_reservations(lines_reservations):
+                reservations_map = defaultdict(list)
+                for reservations in lines_reservations:
+                    for reservation in reservations:
+                        checkout_key = checkouts_keys_map[reservation.checkout_line_id]
+                        reservations_map[checkout_key].append(reservation)
 
-            return [reservations_map[key] for key in keys]
+                return [reservations_map[key] for key in keys]
+
+            return (
+                ActiveReservationsByCheckoutLineIdLoader(self.context)
+                .load_many(checkouts_keys_map.keys())
+                .then(with_lines_reservations)
+            )
 
         return (
             CheckoutLinesByCheckoutTokenLoader(self.context)
@@ -236,18 +241,19 @@ class StocksReservationsByCheckoutTokenLoader(DataLoader):
         )
 
 
-class StocksReservationsByCheckoutLineIdLoader(DataLoader):
-    context_key = "stock_reservation_by_checkout_line_id"
+class ActiveReservationsByCheckoutLineIdLoader(DataLoader):
+    context_key = "active_reservations_by_checkout_line_id"
 
     def batch_load(self, keys):
-        def with_checkouts_lines(checkouts_lines):
-            return []
-
-        return (
-            StocksReservationsByCheckoutLineIdLoader(self.context)
-            .load_many(keys)
-            .then(with_reservations)
-        )
+        reservations_by_checkout_line = defaultdict(list)
+        queryset = Reservation.objects.filter(
+            checkout_line_id__in=keys
+        ).not_expired()  # type: ignore
+        for reservation in queryset:
+            reservations_by_checkout_line[reservation.checkout_line_id].append(
+                reservation
+            )
+        return [reservations_by_checkout_line[key] for key in keys]
 
 
 class WarehouseByIdLoader(DataLoader):

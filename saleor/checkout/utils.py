@@ -175,7 +175,8 @@ def add_variants_to_checkout(
         if not product_channel_listing or not product_channel_listing.is_published:
             raise ProductNotPublished()
 
-    variant_ids_in_lines = {line.variant_id: line for line in checkout.lines.all()}
+    checkout_lines = checkout.lines.select_related("variant")
+    variant_ids_in_lines = {line.variant_id: line for line in checkout_lines}
     to_create = []
     to_update = []
     to_delete = []
@@ -203,6 +204,12 @@ def add_variants_to_checkout(
 
     to_reserve = to_create + to_update
     if enable_stock_reservations and to_reserve:
+        updated_lines_ids = [line.pk for line in to_reserve + to_delete]
+        for line in checkout_lines:
+            if line.pk not in updated_lines_ids:
+                to_reserve.append(line)
+                variants.append(line.variant)
+
         reserve_stocks(
             to_reserve,
             variants,

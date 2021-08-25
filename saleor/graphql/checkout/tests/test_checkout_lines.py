@@ -1,14 +1,16 @@
 import datetime
 import uuid
+from decimal import Decimal
 from unittest import mock
 
 import graphene
+import pytest
 from django.utils import timezone
 
 from ....checkout.error_codes import CheckoutErrorCode
 from ....checkout.fetch import fetch_checkout_info, fetch_checkout_lines
 from ....checkout.models import Checkout
-from ....checkout.utils import calculate_checkout_quantity
+from ....checkout.utils import add_variant_to_checkout, calculate_checkout_quantity
 from ....plugins.manager import get_plugins_manager
 from ....product.models import ProductChannelListing
 from ....warehouse.models import Reservation, Stock
@@ -102,10 +104,106 @@ def test_checkout_lines_add_with_reservations(
     assert line.quantity == 1
     assert calculate_checkout_quantity(lines) == 4
 
-    reservation = line.reservations.first()
+    reservation = line.reservations.get()
     assert reservation
     assert reservation.checkout_line == line
     assert reservation.quantity_reserved == line.quantity
+
+
+def test_checkout_lines_add_updates_reservation(
+    site_settings_with_reservations,
+    user_api_client,
+    checkout_line_with_one_reservation,
+    stock,
+):
+    variant = checkout_line_with_one_reservation.variant
+    checkout = checkout_line_with_one_reservation.checkout
+    line = checkout_line_with_one_reservation
+    lines = fetch_checkout_lines(checkout)
+    assert calculate_checkout_quantity(lines) == 2
+    variant_id = graphene.Node.to_global_id("ProductVariant", variant.pk)
+
+    variables = {
+        "token": checkout.token,
+        "lines": [{"variantId": variant_id, "quantity": 1}],
+        "channelSlug": checkout.channel.slug,
+    }
+    response = user_api_client.post_graphql(MUTATION_CHECKOUT_LINES_ADD, variables)
+    content = get_graphql_content(response)
+    data = content["data"]["checkoutLinesAdd"]
+    assert not data["errors"]
+    checkout.refresh_from_db()
+    lines = fetch_checkout_lines(checkout)
+    line = checkout.lines.latest("pk")
+    assert line.variant == variant
+    assert line.quantity == 3
+    assert calculate_checkout_quantity(lines) == 3
+
+    reservation = line.reservations.get()
+    assert reservation
+    assert reservation.checkout_line == line
+    assert reservation.quantity_reserved == line.quantity
+
+
+def test_checkout_lines_add_new_variant_updates_other_lines_reservations_expirations(
+    site_settings_with_reservations,
+    user_api_client,
+    checkout_line_with_one_reservation,
+    product,
+    warehouse,
+):
+    variant = checkout_line_with_one_reservation.variant
+    checkout = checkout_line_with_one_reservation.checkout
+    line = checkout_line_with_one_reservation
+    reservation = line.reservations.get()
+    lines = fetch_checkout_lines(checkout)
+    assert calculate_checkout_quantity(lines) == 2
+
+    variant_other = product.variants.create(sku=f"SKU_B")
+    variant_other.channel_listings.create(
+        channel=checkout.channel,
+        price_amount=Decimal(10),
+        cost_price_amount=Decimal(1),
+        currency=checkout.channel.currency_code,
+    )
+    Stock.objects.create(
+        product_variant=variant_other, warehouse=warehouse, quantity=15
+    )
+    variant_other_id = graphene.Node.to_global_id("ProductVariant", variant_other.pk)
+
+    variables = {
+        "token": checkout.token,
+        "lines": [{"variantId": variant_other_id, "quantity": 3}],
+        "channelSlug": checkout.channel.slug,
+    }
+    response = user_api_client.post_graphql(MUTATION_CHECKOUT_LINES_ADD, variables)
+    content = get_graphql_content(response)
+    data = content["data"]["checkoutLinesAdd"]
+    assert not data["errors"]
+    checkout.refresh_from_db()
+    lines = fetch_checkout_lines(checkout)
+    line.refresh_from_db()
+    assert line.variant == variant
+    assert line.quantity == 2
+    new_line = checkout.lines.get(variant=variant_other)
+    assert new_line.variant == variant_other
+    assert new_line.quantity == 3
+    assert calculate_checkout_quantity(lines) == 5
+
+    updated_reservation = Reservation.objects.get(checkout_line__variant=variant)
+    assert updated_reservation.checkout_line == line
+    assert updated_reservation.quantity_reserved == line.quantity
+    assert updated_reservation.reserved_until > reservation.reserved_until
+
+    other_reservation = Reservation.objects.get(checkout_line__variant=variant_other)
+    assert other_reservation.checkout_line == new_line
+    assert other_reservation.quantity_reserved == new_line.quantity
+    assert other_reservation.reserved_until > reservation.reserved_until
+
+    assert updated_reservation.reserved_until == other_reservation.reserved_until
+
+    with pytest.raises(Reservation.DoesNotExist):
+        reservation.refresh_from_db()
 
 
 def test_checkout_lines_add_existing_variant(user_api_client, checkout_with_item):
@@ -551,6 +649,67 @@ def test_checkout_lines_update_against_reserved_stock(
     assert calculate_checkout_quantity(lines) == 3
     reservation.refresh_from_db()
     assert Reservation.objects.count() == 1
+
+
+def test_checkout_lines_update_other_lines_reservations_expirations(
+    site_settings_with_reservations,
+    user_api_client,
+    checkout_line_with_one_reservation,
+    product,
+    warehouse,
+):
+    variant = checkout_line_with_one_reservation.variant
+    checkout = checkout_line_with_one_reservation.checkout
+    line = checkout_line_with_one_reservation
+    reservation = line.reservations.get()
+    checkout_info = fetch_checkout_info(checkout, [], [], get_plugins_manager())
+    lines = fetch_checkout_lines(checkout)
+    assert calculate_checkout_quantity(lines) == 2
+
+    variant_other = product.variants.create(sku=f"SKU_B")
+    variant_other.channel_listings.create(
+        channel=checkout.channel,
+        price_amount=Decimal(10),
+        cost_price_amount=Decimal(1),
+        currency=checkout.channel.currency_code,
+    )
+    Stock.objects.create(
+        product_variant=variant_other, warehouse=warehouse, quantity=15
+    )
+    add_variant_to_checkout(checkout_info, variant_other, 2)
+    variant_other_id = graphene.Node.to_global_id("ProductVariant", variant_other.pk)
+
+    variables = {
+        "token": checkout.token,
+        "lines": [{"variantId": variant_other_id, "quantity": 3}],
+    }
+    response = user_api_client.post_graphql(MUTATION_CHECKOUT_LINES_UPDATE, variables)
+    content = get_graphql_content(response)
+    data = content["data"]["checkoutLinesUpdate"]
+    assert not data["errors"]
+    checkout.refresh_from_db()
+    lines = fetch_checkout_lines(checkout)
+    line.refresh_from_db()
+    assert line.variant == variant
+    assert line.quantity == 2
+    new_line = checkout.lines.get(variant=variant_other)
+    assert new_line.variant == variant_other
+    assert new_line.quantity == 3
+    assert calculate_checkout_quantity(lines) == 5
+
+    updated_reservation = Reservation.objects.get(checkout_line__variant=variant)
+    assert updated_reservation.checkout_line == line
+    assert updated_reservation.quantity_reserved == line.quantity
+    assert updated_reservation.reserved_until > reservation.reserved_until
+
+    other_reservation = Reservation.objects.get(checkout_line__variant=variant_other)
+    assert other_reservation.checkout_line == new_line
+    assert other_reservation.quantity_reserved == new_line.quantity
+
+    assert updated_reservation.reserved_until == other_reservation.reserved_until
+
+    with pytest.raises(Reservation.DoesNotExist):
+        reservation.refresh_from_db()
 
 
 def test_checkout_lines_update_with_unavailable_variant(

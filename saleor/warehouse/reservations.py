@@ -1,5 +1,5 @@
 from collections import defaultdict, namedtuple
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Dict, Iterable, List, Tuple
 
 from django.db.models import Sum
@@ -36,6 +36,8 @@ def reserve_stocks(
     checkout_lines = get_checkout_lines_to_reserve(checkout_lines, variants_map)
     if not checkout_lines:
         return
+
+    reserved_until = timezone.now() + timedelta(minutes=length_in_minutes)
 
     stocks = list(
         Stock.objects.select_for_update(of=("self",))
@@ -84,16 +86,16 @@ def reserve_stocks(
     reservations: List[Reservation] = []
     for line in checkout_lines:
         stock_reservations = variant_to_stocks[line.variant_id]
-        insufficient_stock, allocation_items = _create_reservations(
+        insufficient_stock, reserved_items = _create_reservations(
             line,
             variants_map[line.variant_id],
             stock_reservations,
             quantity_allocation_for_stocks,
             quantity_reservation_for_stocks,
             insufficient_stock,
-            length_in_minutes,
+            reserved_until,
         )
-        reservations.extend(allocation_items)
+        reservations.extend(reserved_items)
 
     if insufficient_stock:
         raise InsufficientStock(insufficient_stock)
@@ -111,7 +113,7 @@ def _create_reservations(
     quantity_allocation_for_stocks: dict,
     quantity_reservation_for_stocks: dict,
     insufficient_stock: List[InsufficientStockData],
-    length_in_minutes: int,
+    reserved_until: datetime,
 ) -> Tuple[List[InsufficientStockData], List[Reservation]]:
     quantity = line.quantity
     quantity_reserved = 0
@@ -140,10 +142,7 @@ def _create_reservations(
                     checkout_line=line,
                     stock_id=stock_data.pk,
                     quantity_reserved=quantity_to_reserve,
-                    reserved_until=timezone.now()
-                    + timedelta(
-                        minutes=length_in_minutes,
-                    ),
+                    reserved_until=reserved_until,
                 )
             )
 

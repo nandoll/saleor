@@ -159,7 +159,7 @@ def test_checkout_lines_add_new_variant_updates_other_lines_reservations_expirat
     lines = fetch_checkout_lines(checkout)
     assert calculate_checkout_quantity(lines) == 2
 
-    variant_other = product.variants.create(sku=f"SKU_B")
+    variant_other = product.variants.create(sku="SKU_B")
     variant_other.channel_listings.create(
         channel=checkout.channel,
         price_amount=Decimal(10),
@@ -666,7 +666,7 @@ def test_checkout_lines_update_other_lines_reservations_expirations(
     lines = fetch_checkout_lines(checkout)
     assert calculate_checkout_quantity(lines) == 2
 
-    variant_other = product.variants.create(sku=f"SKU_B")
+    variant_other = product.variants.create(sku="SKU_B")
     variant_other.channel_listings.create(
         channel=checkout.channel,
         price_amount=Decimal(10),

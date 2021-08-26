@@ -142,7 +142,6 @@ All notable, unreleased changes to this project will be documented in this file.
 - Configure a periodic task for removing empty allocations - #7885 by @fowczarek
 
 - Add webhooks for stock changes: `PRODUCT_VARIANT_OUT_OF_STOCK` and `PRODUCT_VARIANT_BACK_IN_STOCK`  - #7590 by @mstrumeck
-- Reserve stocks for checkouts in progress - #7589 by @rafalp
 - Reserve stocks for checkouts - #7589 by @rafalp
 
 ### Breaking

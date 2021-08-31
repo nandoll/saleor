@@ -346,10 +346,10 @@ class AvataxPlugin(BasePlugin):
             return base_total
 
         taxes_data = get_checkout_tax_data(checkout_info, lines, discounts, self.config)
+        variant = checkout_line_info.variant
         return self._calculate_line_total_price(
             taxes_data,
-            # SKU presence is asserted on checkout validation
-            checkout_line_info.variant.sku,  # type: ignore
+            variant.sku or variant.get_global_id(),
             previous_value,
         )
 
@@ -373,8 +373,7 @@ class AvataxPlugin(BasePlugin):
         taxes_data = self._get_order_tax_data(order, previous_value)
         return self._calculate_line_total_price(
             taxes_data,
-            # SKU presence is asserted on checkout validation
-            variant.sku,  # type: ignore
+            variant.sku or variant.get_global_id(),
             previous_value,
         )
 
@@ -413,11 +412,11 @@ class AvataxPlugin(BasePlugin):
         taxes_data = self._get_checkout_tax_data(
             checkout_info, lines, discounts, previous_value
         )
+        variant = checkout_line_info.variant
         return self._calculate_unit_price(
             taxes_data,
             checkout_line_info.line,
-            # SKU presence is asserted on checkout validation
-            checkout_line_info.variant.sku,  # type: ignore
+            variant.sku or variant.get_global_id(),
             previous_value,
         )
 
@@ -435,8 +434,7 @@ class AvataxPlugin(BasePlugin):
         return self._calculate_unit_price(
             taxes_data,
             order_line,
-            # SKU presence is asserted on checkout validation
-            variant.sku,  # type: ignore
+            variant.sku or variant.get_global_id(),
             previous_value,
         )
 
@@ -509,10 +507,10 @@ class AvataxPlugin(BasePlugin):
         response = self._get_checkout_tax_data(
             checkout_info, lines, discounts, previous_value
         )
+        variant = checkout_line_info.variant
         return self._get_unit_tax_rate(
             response,
-            # SKU presence is asserted on checkout validation
-            checkout_line_info.variant.sku,  # type: ignore
+            variant.sku or variant.get_global_id(),
             previous_value,
         )
 
@@ -529,8 +527,7 @@ class AvataxPlugin(BasePlugin):
         response = self._get_order_tax_data(order, previous_value)
         return self._get_unit_tax_rate(
             response,
-            # SKU presence is asserted on checkout validation
-            variant.sku,  # type: ignore
+            variant.sku or variant.get_global_id(),
             previous_value,
         )
 
